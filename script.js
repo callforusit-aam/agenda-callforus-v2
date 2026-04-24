@@ -7,6 +7,10 @@ const GCAL_1 = "https://script.google.com/macros/s/AKfycbxKEBpzjP6zbrato19rFr1Yr
 const GCAL_2 = "https://script.google.com/macros/s/AKfycbx7qYTrubG_KHBkesRUmBxUu3CRI3SC_jhNLH4pxIB0NA5Rgd2nKlgRvmpsToxdJrbN4A/exec";
 const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
+// JSONBin — database principale (stesso della v1)
+const JSONBIN_URL = "https://api.jsonbin.io/v3/b/695e8223d0ea881f405b10f2";
+const JSONBIN_KEY = "$2a$10$/b3gwPG1OcyJYyOgtNM.iujzuvPXS5bPnyJvDz5UI9StDI.nQFMQG";
+
 const isLocal = ["localhost","127.0.0.1",""].includes(location.hostname);
 const BASKET = isLocal ? "Dashboard_TEST_FINAL_V3" : "Dashboard_FINAL_V3";
 const PANTRY_URL = `https://getpantry.cloud/apiv1/pantry/${PANTRY_ID}/basket/${BASKET}`;
@@ -192,54 +196,63 @@ function nav(page, btn) {
 async function loadData(silent) {
     if (!silent) setStatus('sync');
     try {
-        const res=await fetch(PANTRY_URL+"?t="+Date.now(),{cache:"no-store"});
-        if(!res.ok) throw new Error();
-        globalData=await res.json()||{};
+        const res = await fetch(JSONBIN_URL, {
+            method: 'GET',
+            headers: { 'X-Master-Key': JSONBIN_KEY, 'Cache-Control': 'no-cache' }
+        });
+        if (!res.ok) throw new Error('JSONBin error ' + res.status);
+        const json = await res.json();
+        globalData = json.record || {};
+        if (!globalData.backlog) globalData.backlog = [];
         saveToCache(globalData); clearDirty();
-        companyList=globalData.COMPANIES||[];
-        isDataLoaded=true;
-        document.getElementById('loadingScreen').style.display='none';
-        if(!silent) setStatus('ok');
+        companyList = globalData.COMPANIES || [];
+        isDataLoaded = true;
+        document.getElementById('loadingScreen').style.display = 'none';
+        if (!silent) setStatus('ok');
         renderAll(); fetchGoogle();
     } catch(e) {
-        const c=loadFromCache();
-        if(c&&!isDataLoaded){globalData=c;companyList=globalData.COMPANIES||[];renderAll();}
-        setStatus('offline'); isDataLoaded=true;
-        document.getElementById('loadingScreen').style.display='none';
+        const c = loadFromCache();
+        if (c && !isDataLoaded) { globalData = c; companyList = globalData.COMPANIES || []; renderAll(); }
+        setStatus('offline'); isDataLoaded = true;
+        document.getElementById('loadingScreen').style.display = 'none';
     }
 }
 
 function renderAll() {
-    renderCallStrip(); // updates header chip
+    renderCallStrip();
     renderCompanyTags();
     if(document.getElementById('page-home').classList.contains('active')) { renderHome(); renderExternalData(); }
     if(document.getElementById('page-calendar').classList.contains('active')) renderCalendar();
     if(document.getElementById('page-backlog').classList.contains('active')) renderBacklog();
-    const qn=document.getElementById('quickNotes');
-    if(qn&&globalData.home) qn.value=globalData.home.quick||'';
+    const qn = document.getElementById('quickNotes');
+    if (qn && globalData.home) qn.value = globalData.home.quick || '';
 }
 
 function deferredSave() {
-    if(!isDataLoaded) return;
+    if (!isDataLoaded) return;
     clearTimeout(saveTimer); setStatus('wait');
-    saveTimer=setTimeout(()=>saveData(false),2000);
+    saveTimer = setTimeout(() => saveData(false), 2000);
 }
-window.manualSave=()=>saveData(true);
+window.manualSave = () => saveData(true);
 
 async function saveData(immediate) {
-    if(!isDataLoaded) return;
-    if(immediate) clearTimeout(saveTimer);
+    if (!isDataLoaded) return;
+    if (immediate) clearTimeout(saveTimer);
     setStatus('wait');
-    const qn=document.getElementById('quickNotes');
-    if(qn) globalData.home={quick:qn.value};
-    globalData.COMPANIES=companyList;
-    globalData._savedAt=Date.now();
+    const qn = document.getElementById('quickNotes');
+    if (qn) globalData.home = { quick: qn.value };
+    globalData.COMPANIES = companyList;
+    globalData._savedAt = Date.now();
     saveToCache(globalData);
-    if(!navigator.onLine){markDirty();setStatus('offline');if(immediate)showToast('Salvato in locale');return;}
+    if (!navigator.onLine) { markDirty(); setStatus('offline'); if (immediate) showToast('Salvato in locale'); return; }
     try {
-        await fetch(PANTRY_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(globalData)});
-        clearDirty(); setStatus('ok'); if(immediate) showToast('Salvato');
-    } catch(e) { markDirty(); setStatus('offline'); if(immediate) showToast('Salvato in locale'); }
+        await fetch(JSONBIN_URL, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
+            body: JSON.stringify(globalData)
+        });
+        clearDirty(); setStatus('ok'); if (immediate) showToast('Salvato');
+    } catch(e) { markDirty(); setStatus('offline'); if (immediate) showToast('Salvato in locale'); }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -247,11 +260,12 @@ async function saveData(immediate) {
 // ═══════════════════════════════════════════════════════════
 async function checkConflict() {
     try {
-        const r=await fetch(PANTRY_URL+"?t="+Date.now(),{cache:"no-store"});
-        if(!r.ok) return;
-        const d=await r.json();
-        if((d._savedAt||0)>getCacheTs()+5000) showConflictBanner();
-    }catch(e){}
+        const res = await fetch(JSONBIN_URL, { method: 'GET', headers: { 'X-Master-Key': JSONBIN_KEY, 'Cache-Control': 'no-cache' } });
+        if (!res.ok) return;
+        const json = await res.json();
+        const remoteTs = (json.record || {})._savedAt || 0;
+        if (remoteTs > getCacheTs() + 5000) showConflictBanner();
+    } catch(e) {}
 }
 function showConflictBanner() {
     if(document.getElementById('conflictBanner')) return;
