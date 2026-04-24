@@ -3,15 +3,15 @@
 // ═══════════════════════════════════════════════════════════
 const PWD = "giuseppe90";
 const PANTRY_ID = "e39b701d-95a9-48c0-ae96-d13b53856c94";
-const GCAL_1 = "https://script.google.com/macros/s/AKfycbw7l-WUQr3cW1BxuEbIMmmGG_MdCfJxW1_O2S-E740/exec";
+const GCAL_1 = "https://script.google.com/macros/s/AKfycbxKEBpzjP6zbrato19rFr1YrTU6hKEy9iy712jVmpVa5Lfw2FKtgCX7Lmv_FHnStvwr/exec";
 const GCAL_2 = "https://script.google.com/macros/s/AKfycbx7qYTrubG_KHBkesRUmBxUu3CRI3SC_jhNLH4pxIB0NA5Rgd2nKlgRvmpsToxdJrbN4A/exec";
 const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
 const isLocal = ["localhost","127.0.0.1",""].includes(location.hostname);
-const BASKET = isLocal ? "Dashboard_TEST_FINAL_V2" : "Dashboard_FINAL_V2";
+const BASKET = isLocal ? "Dashboard_TEST_FINAL_V3" : "Dashboard_FINAL_V3";
 const PANTRY_URL = `https://getpantry.cloud/apiv1/pantry/${PANTRY_ID}/basket/${BASKET}`;
 const LS_KEY  = `cfu_v3_${BASKET}`;
-const LS_DIRTY = `cfu_dirty_${BASKET}`;
+const LS_DIRTY = `cfu_dirty_v3_${BASKET}`;
 
 // ═══════════════════════════════════════════════════════════
 // STATE
