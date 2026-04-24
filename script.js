@@ -311,13 +311,14 @@ function renderCallStrip() {
 
     if (next) {
         const time = new Date(next.startTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-        const co = guessCompany(next.title);
         chip.style.display = 'flex';
+        chip.style.cursor = 'pointer';
+        chip.onclick = () => window.open(next.link, '_blank');
         chip.innerHTML = `
             <span style="font-size:9px;font-weight:700;background:var(--c-yellow);color:#000;padding:2px 6px;border-radius:3px;letter-spacing:.04em;">CALL</span>
             <span style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--c-text);">${time}</span>
             <span style="font-size:12px;color:var(--c-text-2);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${next.title}</span>
-            <a href="${next.link}" target="_blank" style="font-size:11px;font-weight:600;color:var(--c-accent);text-decoration:none;padding-left:2px;">→</a>`;
+            <span style="font-size:11px;font-weight:600;color:var(--c-accent);">Entra →</span>`;
     } else {
         chip.style.display = 'none';
     }
@@ -359,7 +360,7 @@ async function generateAI() {
 Task aperti oggi: ${open.map(t=>t.txt).join(', ')||'nessuno'}. Completati: ${done.length}. Backlog non pianificato: ${bl.length}. Call oggi: ${calls.map(ev=>new Date(ev.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+' '+ev.title).join(', ')||'nessuna'}. Prossima: ${next?new Date(next.startTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+' — '+next.title:'—'}.
 Niente markdown né liste. Solo testo scorrevole. Concludi con cosa prioritizzare.`;
     try {
-        const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:CLAUDE_MODEL,max_tokens:1000,messages:[{role:"user",content:prompt}]})});
+        const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-ipc":"true"},body:JSON.stringify({model:CLAUDE_MODEL,max_tokens:1000,messages:[{role:"user",content:prompt}]})});
         const data=await res.json();
         const text=data.content?.map(c=>c.text||'').join('')||'Non disponibile.';
         el.innerHTML=`<div class="ai-label"><span class="material-icons-round" style="font-size:14px;">auto_awesome</span> AI Briefing</div><p class="ai-text">${text}</p>`;
