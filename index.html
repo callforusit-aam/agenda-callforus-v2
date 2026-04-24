@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CallForUs | Manager</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+</head>
+<body data-theme="light">
+
+<div id="toast" class="toast">OK</div>
+
+<!-- ══ LOGIN ════════════════════════════════════════════════ -->
+<div id="loginScreen" class="overlay">
+    <div class="login-box">
+        <img src="logo.png" alt="" style="height:48px;margin-bottom:20px;" onerror="this.style.display='none'">
+        <div class="login-title">CallForUs</div>
+        <div class="login-sub">Manager Dashboard</div>
+        <input type="password" id="passwordInput" class="login-inp" placeholder="Password"
+            onkeydown="if(event.key==='Enter')tryLogin()">
+        <button class="btn btn-primary" onclick="tryLogin()" style="width:100%;justify-content:center;">Accedi</button>
+        <p id="loginError" style="color:var(--c-red);font-size:12px;margin-top:10px;display:none;">Password errata</p>
+    </div>
+</div>
+
+<!-- ══ LOADING ═══════════════════════════════════════════════ -->
+<div id="loadingScreen" class="overlay" style="display:none;">
+    <div class="loader"></div>
+    <p style="margin-top:14px;font-size:12px;color:var(--c-text-2);" id="loadingText">Caricamento...</p>
+</div>
+
+<!-- ══ MODAL: Nuovo Gruppo ════════════════════════════════════ -->
+<div id="groupModal" class="modal-bg">
+    <div class="modal">
+        <div class="modal-head">
+            <span class="modal-title">Nuovo Gruppo</span>
+            <button class="modal-close" onclick="closeModal('groupModal')"><span class="material-icons-round">close</span></button>
+        </div>
+        <label class="form-label">Giorno</label>
+        <select id="formDay" class="modal-select">
+            <option value="mon">Lunedì</option><option value="tue">Martedì</option>
+            <option value="wed">Mercoledì</option><option value="thu">Giovedì</option><option value="fri">Venerdì</option>
+        </select>
+        <label class="form-label">Azienda</label>
+        <select id="formCompany" class="modal-select"></select>
+        <label class="form-label">Task (uno per riga)</label>
+        <textarea id="formTasks" class="modal-ta" placeholder="- Task 1&#10;- Task 2&#10;- Task 3"></textarea>
+        <button class="btn btn-primary" onclick="saveFromForm()" style="width:100%;justify-content:center;margin-top:6px;">
+            Inserisci nel calendario
+        </button>
+    </div>
+</div>
+
+<!-- ══ MODAL: Pianifica backlog ══════════════════════════════ -->
+<div id="scheduleModal" class="modal-bg">
+    <div class="modal" style="max-width:320px;">
+        <div class="modal-head">
+            <span class="modal-title">Pianifica attività</span>
+            <button class="modal-close" onclick="closeModal('scheduleModal')"><span class="material-icons-round">close</span></button>
+        </div>
+        <p style="font-size:12px;color:var(--c-text-2);margin-bottom:14px;">Scegli il giorno in cui spostare questa attività:</p>
+        <label class="form-label">Giorno</label>
+        <select id="scheduleDay" class="modal-select">
+            <option value="mon">Lunedì</option><option value="tue">Martedì</option>
+            <option value="wed">Mercoledì</option><option value="thu">Giovedì</option><option value="fri">Venerdì</option>
+        </select>
+        <button class="btn btn-primary" onclick="confirmSchedule()" style="width:100%;justify-content:center;">
+            <span class="material-icons-round">event_available</span> Fissa nel calendario
+        </button>
+    </div>
+</div>
+
+<!-- ══ MODAL: Export ═════════════════════════════════════════ -->
+<div id="exportModal" class="modal-bg">
+    <div class="modal export-modal">
+        <div class="modal-head">
+            <span class="modal-title">Esporta settimana</span>
+            <button class="modal-close" onclick="closeModal('exportModal')"><span class="material-icons-round">close</span></button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <button class="btn btn-primary" onclick="exportCSV();closeModal('exportModal');" style="justify-content:center;">
+                <span class="material-icons-round">table_chart</span> Esporta CSV
+            </button>
+            <button class="btn btn-ghost" onclick="exportPrint();closeModal('exportModal');" style="justify-content:center;">
+                <span class="material-icons-round">print</span> Stampa / PDF
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ APP SHELL ══════════════════════════════════════════════ -->
+<div id="app-shell" style="display:none;">
+
+    <!-- Sidebar (desktop) -->
+    <nav class="sidebar">
+        <div class="sidebar-logo">H</div>
+        <div class="sidebar-nav">
+            <button class="sb-btn active" id="sb-home" onclick="nav('home',this)" data-tip="Dashboard">
+                <span class="material-icons-round">dashboard</span>
+            </button>
+            <button class="sb-btn" id="sb-calendar" onclick="nav('calendar',this)" data-tip="Calendario">
+                <span class="material-icons-round">calendar_today</span>
+            </button>
+            <button class="sb-btn" id="sb-backlog" onclick="nav('backlog',this)" data-tip="Da Pianificare">
+                <span class="material-icons-round">rule</span>
+            </button>
+            <button class="sb-btn" id="sb-notes" onclick="nav('notes',this)" data-tip="Note">
+                <span class="material-icons-round">edit_note</span>
+            </button>
+        </div>
+        <div class="sidebar-bottom">
+            <button class="sb-btn" onclick="toggleTheme()" data-tip="Tema">
+                <span class="material-icons-round">dark_mode</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Header -->
+    <header class="app-header">
+        <div class="header-title">
+            <h2 id="pageTitle">Dashboard</h2>
+            <div class="header-sub">
+                <b id="currentDayLabel">...</b>
+                <span id="currentWeekRange">...</span>
+            </div>
+        </div>
+        <div class="header-actions">
+            <div class="status-indicator">
+                <span class="status-dot ok" id="statusDot"></span>
+                <span id="statusText">Online</span>
+            </div>
+            <!-- next call chip -->
+            <div id="nextCallChip" style="display:none;align-items:center;gap:6px;background:var(--c-yellow-bg);border:1px solid #FDE68A;border-radius:20px;padding:4px 12px;cursor:pointer;" title="Prossima call"></div>
+            <button class="icon-btn" onclick="manualSave()" title="Salva (S)"><span class="material-icons-round">save</span></button>
+            <button class="icon-btn" onclick="forceSync()" title="Ricarica"><span class="material-icons-round">refresh</span></button>
+            <button class="icon-btn" onclick="openExport()" title="Esporta (E)"><span class="material-icons-round">download</span></button>
+            <a href="https://calendar.google.com/calendar/u/0/r/eventedit?v=2" target="_blank" class="btn btn-primary">
+                <span class="material-icons-round">add</span> Organizza Call
+            </a>
+        </div>
+    </header>
+
+    <!-- Main content -->
+    <div class="main-content" style="grid-column:2;grid-row:2/3;display:flex;flex-direction:column;overflow:hidden;">
+
+        <!-- Toolbar (calendar) -->
+        <div class="toolbar" id="toolbar">
+            <button class="btn btn-ghost" onclick="openModal('groupModal')" id="groupBtn" style="display:none;">
+                <span class="material-icons-round">playlist_add</span> Gruppo
+            </button>
+            <div class="toolbar-sep" id="toolbarSep" style="display:none;"></div>
+            <input type="color" id="newCompColor" value="#2563EB" title="Colore">
+            <input type="text" id="newCompName" class="co-inp" placeholder="NUOVA AZIENDA" maxlength="20"
+                onkeydown="if(event.key==='Enter')addNewCompany()">
+            <button class="co-add" onclick="addNewCompany()" title="Aggiungi"><span class="material-icons-round">add</span></button>
+            <div class="toolbar-sep"></div>
+            <div id="companyTagsContainer" style="display:contents;"></div>
+            <!-- filter badge -->
+            <div id="filterBadge" style="display:none;margin-left:auto;display:none;align-items:center;gap:6px;background:var(--c-accent-bg);padding:4px 10px;border-radius:20px;border:1px solid var(--c-accent);">
+                <span style="font-size:11px;font-weight:600;color:var(--c-accent);" id="filterBadgeName"></span>
+                <button onclick="clearFilter()" style="background:none;border:none;color:var(--c-accent);cursor:pointer;font-size:16px;line-height:1;padding:0;">×</button>
+            </div>
+        </div>
+
+        <!-- ── HOME ─────────────────────────────────────────── -->
+        <div id="page-home" class="page active">
+            <div class="home-layout">
+                <!-- main col -->
+                <div class="home-main">
+                    <!-- AI briefing -->
+                    <div id="aiCard" class="ai-card">
+                        <div class="ai-label"><span class="material-icons-round" style="font-size:14px;">auto_awesome</span> AI Briefing</div>
+                        <div style="display:flex;align-items:center;gap:8px;"><div class="loader" style="width:16px;height:16px;border-width:2px;"></div><span style="font-size:12px;color:var(--c-text-2);">Analisi in corso...</span></div>
+                    </div>
+
+                    <div class="home-section" style="flex:1;overflow:hidden;">
+                        <div class="sec-head">
+                            <span class="sec-title">Attività di oggi</span>
+                            <span id="homeTaskCount" class="badge badge-blue">0</span>
+                        </div>
+                        <div class="home-tasks-list" id="homeTasks"></div>
+                    </div>
+                </div>
+
+                <!-- side col -->
+                <div class="home-side">
+                    <div class="home-section" style="flex:1;overflow:hidden;">
+                        <div class="sec-head"><span class="sec-title">Posta</span></div>
+                        <div id="mailList" style="flex:1;overflow-y:auto;"></div>
+                        <div style="padding:10px 20px;border-top:1px solid var(--c-border);">
+                            <a href="https://mail.google.com" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:12px;">Apri Gmail</a>
+                        </div>
+                    </div>
+                    <div class="home-section" style="flex:1;overflow:hidden;">
+                        <div class="sec-head"><span class="sec-title">Drive</span></div>
+                        <div id="driveList" style="flex:1;overflow-y:auto;"></div>
+                        <div style="padding:10px 20px;border-top:1px solid var(--c-border);">
+                            <a href="https://drive.google.com" target="_blank" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:12px;">Apri Drive</a>
+                        </div>
+                    </div>
+                    <div class="home-section" style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
+                        <div class="sec-head"><span class="sec-title">Note veloci</span></div>
+                        <textarea id="quickNotes" class="quick-notes-ta" placeholder="Scrivi appunti..." oninput="deferredSave()"></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── CALENDARIO ────────────────────────────────────── -->
+        <div id="page-calendar" class="page">
+            <div class="cal-page">
+                <!-- mobile day tabs -->
+                <div class="day-tabs-mobile" id="dayTabsMobile"></div>
+
+                <!-- 5-col grid -->
+                <div class="cal-grid" id="calGrid"></div>
+
+                <!-- nav -->
+                <div class="cal-nav">
+                    <button class="icon-btn" onclick="changeWeek(-1)"><span class="material-icons-round">chevron_left</span></button>
+                    <span class="cal-nav-label" id="calDateDisplay">...</span>
+                    <button class="icon-btn" onclick="changeWeek(1)"><span class="material-icons-round">chevron_right</span></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── DA PIANIFICARE ─────────────────────────────────── -->
+        <div id="page-backlog" class="page">
+            <div class="backlog-layout">
+                <div class="bl-form-panel">
+                    <p style="font-size:13px;font-weight:700;letter-spacing:-.01em;margin-bottom:14px;">Aggiungi attività</p>
+                    <label class="form-label">Nome azienda</label>
+                    <input type="text" id="blCompany" class="form-input" placeholder="Es. GEARXPRO"
+                        style="text-transform:uppercase;font-family:var(--mono);font-size:12px;margin-bottom:12px;"
+                        onkeydown="if(event.key==='Enter')document.getElementById('blText').focus()">
+                    <label class="form-label">Descrizione</label>
+                    <textarea id="blText" class="form-textarea" placeholder="Cosa fare...&#10;&#10;⌘+Enter per aggiungere"
+                        onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter')addToBacklog()"></textarea>
+                    <button class="btn btn-primary" onclick="addToBacklog()" style="width:100%;justify-content:center;margin-top:12px;">
+                        <span class="material-icons-round">add_task</span> Aggiungi alla lista
+                    </button>
+                </div>
+                <div class="bl-list-panel">
+                    <div class="sec-head" style="padding:14px 20px 10px;border-bottom:1px solid var(--c-border);flex-shrink:0;">
+                        <span class="sec-title">Da pianificare</span>
+                        <span id="backlogCount" class="badge badge-yellow">0</span>
+                    </div>
+                    <div id="suggestBar"></div>
+                    <div class="bl-list" id="backlogList"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── NOTE ─────────────────────────────────────────── -->
+        <div id="page-notes" class="page">
+            <div class="notes-page">
+                <div class="notes-col">
+                    <div class="sec-head"><span class="sec-title">Note veloci</span></div>
+                    <textarea id="quickNotes2" class="quick-notes-ta" placeholder="Scrivi..." oninput="syncNotes(this)"></textarea>
+                </div>
+                <div class="notes-col">
+                    <div class="sec-head"><span class="sec-title">AI Briefing</span></div>
+                    <div id="aiCardNotes" style="padding:14px 20px;flex:1;overflow-y:auto;font-size:13px;line-height:1.7;color:var(--c-text-2);">
+                        <div style="color:var(--c-text-3);font-size:12px;">Apri prima la Dashboard per generare il briefing.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /main-content -->
+
+    <!-- Bottom nav (mobile only) -->
+    <nav class="bottom-nav">
+        <button class="bn-btn active" id="bn-home" onclick="nav('home',this)">
+            <span class="material-icons-round">dashboard</span>
+            <span class="bn-label">Home</span>
+        </button>
+        <button class="bn-btn" id="bn-calendar" onclick="nav('calendar',this)">
+            <span class="material-icons-round">calendar_today</span>
+            <span class="bn-label">Cal</span>
+        </button>
+        <button class="bn-btn" id="bn-backlog" onclick="nav('backlog',this)">
+            <span class="material-icons-round">rule</span>
+            <span class="bn-label">Backlog</span>
+        </button>
+        <button class="bn-btn" id="bn-notes" onclick="nav('notes',this)">
+            <span class="material-icons-round">edit_note</span>
+            <span class="bn-label">Note</span>
+        </button>
+    </nav>
+
+</div><!-- /app-shell -->
+
+<script src="script.js"></script>
+</body>
+</html>
