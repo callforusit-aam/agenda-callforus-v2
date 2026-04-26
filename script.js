@@ -936,32 +936,46 @@ async function processVoiceTranscript() {
     const transcriptEl = document.getElementById('voiceTranscript');
     if (transcriptEl) transcriptEl.innerText = `"${voiceTranscript}"`;
 
-    // Try local parsing first (no CORS issues, instant)
-    const localResult = parseVoiceLocally(voiceTranscript);
-
-    if (localResult.length > 0) {
-        pendingVoiceTasks = localResult;
-        renderVoicePreview();
-        voiceSetState('voiceResult');
-        return;
-    }
-
-    // Fallback: try Claude API
     try {
         const companiesCtx = companyList.length
-            ? `Aziende disponibili: ${companyList.map(c=>c.name).join(', ')}.`
-            : 'Nessuna azienda registrata, usa il nome che senti.';
+            ? companyList.map(c => c.name).join(', ')
+            : 'nessuna';
 
-        const prompt = `Sei un assistente che analizza testo vocale e crea task lavorativi.
-${companiesCtx}
+        const todayDate = new Date();
+        const weekDays = [];
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(currentMon);
+            d.setDate(currentMon.getDate() + i);
+            weekDays.push({
+                code: ['mon','tue','wed','thu','fri','sat','sun'][i],
+                date: d.getDate(),
+                month: d.getMonth() + 1,
+                name: d.toLocaleDateString('it-IT', { weekday: 'long' })
+            });
+        }
+        const weekCtx = weekDays.map(d => `${d.name} ${d.date}/${d.month} → "${d.code}"`).join(', ');
+
+        const prompt = `Sei un assistente che trasforma testo vocale in task lavorativi strutturati.
+
+Aziende disponibili: ${companiesCtx}
+Settimana corrente: ${weekCtx}
+Oggi: ${todayDate.getDate()}/${todayDate.getMonth()+1}
 Testo vocale: "${voiceTranscript}"
-Estrai aziende e task. Abbina ogni azienda a quelle disponibili (ignora maiuscole, accetta varianti fonetiche).
-Rispondi SOLO con JSON array, zero testo extra:
-[{"company":"NOME","tasks":["task1","task2"]}]
-Se niente trovato: []`;
+
+Regole:
+1. Abbina ogni azienda citata a quelle disponibili usando corrispondenza fonetica/approssimativa (es. "calughi" → CALUGI, "gear x pro" → GEARXPRO)
+2. Riconosci date/giorni: "il 27 aprile" → cerca il giorno code corrispondente, "domani" → giorno successivo a oggi, "lunedì" → "mon", "martedì" → "tue", ecc.
+3. Se nessun giorno è specificato, usa il giorno di oggi
+4. Ottimizza ogni task: rimuovi parole inutili, rendi la frase concisa e professionale (es. "organizza una spedizione fba" → "Spedizione FBA")
+5. Un task può avere un giorno diverso dagli altri
+
+Rispondi SOLO con JSON valido, zero testo extra:
+[{"company":"NOME_ESATTO","dayCode":"mon","tasks":["task ottimizzato"]}]
+
+Raggruppa per company+giorno. Se più task della stessa azienda in giorni diversi, crea oggetti separati.`;
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
+        const timeout = setTimeout(() => controller.abort(), 12000);
 
         const res = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
@@ -972,7 +986,7 @@ Se niente trovato: []`;
             },
             body: JSON.stringify({
                 model: CLAUDE_MODEL,
-                max_tokens: 500,
+                max_tokens: 600,
                 messages: [{ role: "user", content: prompt }]
             })
         });
@@ -987,113 +1001,151 @@ Se niente trovato: []`;
         if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('empty');
 
         pendingVoiceTasks = parsed.map(item => {
-            const comp = companyList.find(c => c.name.toUpperCase() === item.company.toUpperCase());
-            return { company: item.company.toUpperCase(), color: comp?.color || '#E5E7EB', tasks: item.tasks };
+            const comp = companyList.find(c => c.name.toUpperCase() === item.company.toUpperCase())
+                      || fuzzyFindCompany(item.company);
+            return {
+                company: comp ? comp.name : item.company.toUpperCase(),
+                color: comp?.color || '#E5E7EB',
+                dayCode: item.dayCode || todayCode() || 'mon',
+                tasks: item.tasks || []
+            };
         });
+
         renderVoicePreview();
         voiceSetState('voiceResult');
 
     } catch(e) {
-        // If API fails, show what we transcribed and let user assign manually
-        showVoiceManual();
+        // Fallback: local parser
+        const localResult = parseVoiceLocally(voiceTranscript);
+        if (localResult.length > 0) {
+            pendingVoiceTasks = localResult;
+            renderVoicePreview();
+            voiceSetState('voiceResult');
+        } else {
+            showVoiceManual();
+        }
     }
 }
 
-// ── Local voice parser ───────────────────────────────────────
-// Splits transcript by company keywords, no API needed
+// ── Fuzzy company matching (Levenshtein) ─────────────────────
+function levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    const dp = Array.from({length: m+1}, (_,i) => Array.from({length: n+1}, (_,j) => i===0?j:j===0?i:0));
+    for (let i=1;i<=m;i++) for (let j=1;j<=n;j++)
+        dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    return dp[m][n];
+}
+
+function fuzzyFindCompany(name) {
+    if (!companyList.length || !name) return null;
+    const n = name.toLowerCase().replace(/\s+/g,'');
+    let best = null, bestScore = Infinity;
+    companyList.forEach(c => {
+        const cn = c.name.toLowerCase().replace(/\s+/g,'');
+        const dist = levenshtein(n, cn);
+        const threshold = Math.max(2, Math.floor(cn.length * 0.4));
+        if (dist < bestScore && dist <= threshold) { bestScore = dist; best = c; }
+    });
+    return best;
+}
+
+// ── Local fallback parser ────────────────────────────────────
 function parseVoiceLocally(text) {
     if (!companyList.length) return [];
-
     const result = [];
     const t = text.toLowerCase();
+    const dayToCode = {
+        'lunedì':'mon','lunedi':'mon','lun':'mon',
+        'martedì':'tue','martedi':'tue','mar':'tue',
+        'mercoledì':'wed','mercoledi':'wed','mer':'wed',
+        'giovedì':'thu','giovedi':'thu','gio':'thu',
+        'venerdì':'fri','venerdi':'fri','ven':'fri',
+        'domani': getDayCode(1), 'dopodomani': getDayCode(2), 'oggi': todayCode()||'mon'
+    };
 
-    // Build triggers: each company name + common prepositions before it
-    // e.g. "per gearxpro", "gearxpro:", "riguardo gearxpro"
-    const triggers = ['per ', 'per la ', 'per il ', 'riguardo ', 'su ', ''];
-
-    // Find positions of each company mention
+    // Find company mentions with fuzzy
+    const words = t.split(/\s+/);
     const mentions = [];
+
     companyList.forEach(comp => {
-        const name = comp.name.toLowerCase();
-        // Also try fuzzy: remove vowels for phonetic similarity
-        triggers.forEach(trigger => {
-            let idx = t.indexOf(trigger + name);
-            while (idx !== -1) {
-                mentions.push({ pos: idx, company: comp, trigLen: trigger.length + name.length });
-                idx = t.indexOf(trigger + name, idx + 1);
+        const cn = comp.name.toLowerCase().replace(/\s+/g,'');
+        // try exact and word-by-word
+        for (let i=0; i<words.length; i++) {
+            const w = words[i].replace(/[^a-z0-9]/g,'');
+            if (!w) continue;
+            const dist = levenshtein(w, cn);
+            const threshold = Math.max(1, Math.floor(cn.length * 0.35));
+            if (dist <= threshold || cn.includes(w) || w.includes(cn.substring(0,4))) {
+                mentions.push({ wordIdx: i, company: comp });
+                break;
             }
-        });
-    });
-
-    if (mentions.length === 0) return [];
-
-    // Sort by position
-    mentions.sort((a, b) => a.pos - b.pos);
-
-    // Remove duplicates (same company, close position)
-    const deduped = [];
-    mentions.forEach(m => {
-        const last = deduped[deduped.length - 1];
-        if (!last || last.company.name !== m.company.name || m.pos - last.pos > 20) {
-            deduped.push(m);
         }
     });
 
-    // Extract text segments between company mentions
-    deduped.forEach((mention, i) => {
-        const segStart = mention.pos + mention.trigLen;
-        const segEnd = deduped[i + 1] ? deduped[i + 1].pos : text.length;
-        const segment = text.slice(segStart, segEnd).trim();
+    if (!mentions.length) return [];
+    mentions.sort((a,b) => a.wordIdx - b.wordIdx);
 
-        // Split segment into tasks by conjunctions and punctuation
+    // Detect day in text
+    let detectedDay = todayCode() || 'mon';
+    Object.entries(dayToCode).forEach(([keyword, code]) => {
+        if (t.includes(keyword)) detectedDay = code;
+    });
+    // detect "il NN" date pattern
+    const dateMatch = t.match(/il\s+(\d{1,2})/);
+    if (dateMatch) {
+        const dayNum = parseInt(dateMatch[1]);
+        const days = ['mon','tue','wed','thu','fri'];
+        for (let i=0;i<5;i++) {
+            const d = new Date(currentMon); d.setDate(currentMon.getDate()+i);
+            if (d.getDate() === dayNum) { detectedDay = days[i]; break; }
+        }
+    }
+
+    mentions.forEach((mention, i) => {
+        const segStart = mention.wordIdx + 1;
+        const segEnd = mentions[i+1] ? mentions[i+1].wordIdx : words.length;
+        const segment = words.slice(segStart, segEnd).join(' ').replace(/^(per|e|anche|poi|,)\s*/i,'').trim();
+
         const tasks = segment
-            .split(/[,;\.]\s*|\s+e\s+|\s+anche\s+|\s+poi\s+|\s+inoltre\s+/i)
-            .map(t => t.trim())
-            .filter(t => t.length > 2 && !/^(e|il|la|lo|i|gli|le|un|una|del|della|dei|degli|delle)$/i.test(t));
+            .split(/[,;]\s*|\s+e\s+|\s+poi\s+/i)
+            .map(t => t.replace(/\b(il|lo|la|i|gli|le|un|una)\b/gi,'').trim())
+            .filter(t => t.length > 2);
 
-        if (tasks.length > 0) {
-            // Capitalize first letter of each task
-            const cleanTasks = tasks.map(t => t.charAt(0).toUpperCase() + t.slice(1));
-            const existing = result.find(r => r.company === mention.company.name);
-            if (existing) {
-                existing.tasks.push(...cleanTasks);
-            } else {
-                result.push({
-                    company: mention.company.name,
-                    color: mention.company.color,
-                    tasks: cleanTasks
-                });
-            }
+        const cleanTasks = tasks.map(t => t.charAt(0).toUpperCase() + t.slice(1));
+        if (cleanTasks.length > 0) {
+            result.push({ company: mention.company.name, color: mention.company.color, dayCode: detectedDay, tasks: cleanTasks });
         }
     });
 
     return result;
 }
 
-// ── Manual fallback: show transcript, let user assign company ─
+function getDayCode(daysFromToday) {
+    const codes = ['sun','mon','tue','wed','thu','fri','sat'];
+    const d = new Date(); d.setDate(d.getDate() + daysFromToday);
+    return codes[d.getDay()];
+}
+
 function showVoiceManual() {
-    const el = document.getElementById('voiceResult');
-    if (!el) return;
-
     const companyOptions = companyList.map((c,i) => `<option value="${i}">${c.name}</option>`).join('');
-
-    // Split transcript into task lines
-    const lines = voiceTranscript
-        .split(/[,;\.]\s+|\s+e\s+/i)
-        .map(l => l.trim())
-        .filter(l => l.length > 2);
-
-    pendingVoiceTasks = [{ company: companyList[0]?.name || '', color: companyList[0]?.color || '#E5E7EB', tasks: lines }];
-
+    const dayNames = {mon:'Lunedì',tue:'Martedì',wed:'Mercoledì',thu:'Giovedì',fri:'Venerdì'};
+    const dc = todayCode() || 'mon';
+    const dayOptions = ['mon','tue','wed','thu','fri'].map(c=>`<option value="${c}"${c===dc?' selected':''}>${dayNames[c]}</option>`).join('');
+    const lines = voiceTranscript.split(/[,;\.]\s+|\s+e\s+/i).map(l=>l.trim()).filter(l=>l.length>2);
+    pendingVoiceTasks = [{ company: companyList[0]?.name||'', color: companyList[0]?.color||'#E5E7EB', dayCode: dc, tasks: lines }];
     document.getElementById('voicePreview').innerHTML = `
-        <div style="margin-bottom:12px;">
-            <p style="font-size:12px;color:var(--c-text-2);margin-bottom:8px;">Non ho riconosciuto aziende automaticamente. Assegna manualmente:</p>
+        <p style="font-size:12px;color:var(--c-text-2);margin-bottom:10px;">Non ho riconosciuto aziende. Assegna manualmente:</p>
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
             <select onchange="pendingVoiceTasks[0].company=companyList[this.value]?.name||'';pendingVoiceTasks[0].color=companyList[this.value]?.color||'#E5E7EB';"
-                style="width:100%;padding:8px;border:1px solid var(--c-border);border-radius:6px;background:var(--c-bg);color:var(--c-text);font-family:var(--font);font-size:13px;margin-bottom:10px;">
-                ${companyList.length ? companyOptions : '<option>Nessuna azienda salvata</option>'}
+                style="flex:1;padding:8px;border:1px solid var(--c-border);border-radius:6px;background:var(--c-bg);color:var(--c-text);font-family:var(--font);font-size:13px;">
+                ${companyList.length?companyOptions:'<option>Nessuna azienda</option>'}
+            </select>
+            <select onchange="pendingVoiceTasks[0].dayCode=this.value"
+                style="padding:8px;border:1px solid var(--c-border);border-radius:6px;background:var(--c-bg);color:var(--c-text);font-family:var(--mono);font-size:12px;font-weight:700;">
+                ${dayOptions}
             </select>
         </div>
-        ${lines.map((t,i) => `
+        ${lines.map((t,i)=>`
             <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--c-border);">
                 <div style="width:14px;height:14px;border:1.5px solid var(--c-border-2);border-radius:3px;flex-shrink:0;"></div>
                 <input value="${escAttr(t)}" oninput="pendingVoiceTasks[0].tasks[${i}]=this.value"
@@ -1101,16 +1153,19 @@ function showVoiceManual() {
                 <button onclick="pendingVoiceTasks[0].tasks.splice(${i},1);showVoiceManual();"
                     style="background:none;border:none;color:var(--c-text-3);cursor:pointer;font-size:16px;">×</button>
             </div>`).join('')}`;
-
     voiceSetState('voiceResult');
 }
 
 function renderVoicePreview() {
     const el = document.getElementById('voicePreview'); if (!el) return;
+    const dayNames = {mon:'Lunedì',tue:'Martedì',wed:'Mercoledì',thu:'Giovedì',fri:'Venerdì'};
+
     el.innerHTML = pendingVoiceTasks.map((group, gi) => {
-        const comp = companyList.find(c => c.name.toUpperCase() === group.company);
+        const comp = companyList.find(c => c.name.toUpperCase() === group.company.toUpperCase());
         const bg = comp?.color || '#E5E7EB';
         const col = getContrast(bg);
+        const dc = group.dayCode || todayCode() || 'mon';
+
         const tasksHtml = group.tasks.map((t, ti) => `
             <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--c-border);">
                 <div style="width:14px;height:14px;border:1.5px solid var(--c-border-2);border-radius:3px;flex-shrink:0;"></div>
@@ -1119,36 +1174,41 @@ function renderVoicePreview() {
                 <button onclick="pendingVoiceTasks[${gi}].tasks.splice(${ti},1);renderVoicePreview();"
                     style="background:none;border:none;color:var(--c-text-3);cursor:pointer;font-size:16px;line-height:1;padding:0;">×</button>
             </div>`).join('');
+
         return `
-            <div style="margin-bottom:14px;">
-                <span style="display:inline-block;background:${bg};color:${col};font-size:10px;font-weight:700;letter-spacing:.06em;padding:3px 9px;border-radius:4px;margin-bottom:8px;text-transform:uppercase;">${group.company}</span>
-                ${tasksHtml}
+            <div style="margin-bottom:12px;border:1px solid var(--c-border);border-radius:8px;overflow:hidden;">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--c-bg);border-bottom:1px solid var(--c-border);">
+                    <span style="background:${bg};color:${col};font-size:10px;font-weight:700;letter-spacing:.06em;padding:3px 9px;border-radius:4px;text-transform:uppercase;">${group.company}</span>
+                    <select onchange="pendingVoiceTasks[${gi}].dayCode=this.value"
+                        style="border:1px solid var(--c-border);border-radius:5px;background:var(--c-surface);color:var(--c-text);font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 8px;cursor:pointer;outline:none;">
+                        ${['mon','tue','wed','thu','fri'].map(c=>`<option value="${c}"${c===dc?' selected':''}>${dayNames[c]}</option>`).join('')}
+                    </select>
+                </div>
+                <div style="padding:0 12px;">${tasksHtml}</div>
             </div>`;
     }).join('');
 }
 
 window.confirmVoiceTasks = function() {
     if (!pendingVoiceTasks.length) return;
-
-    const dc = todayCode() || 'mon';
     const key = getWeekKey();
     if (!globalData[key]) globalData[key] = {};
-    if (!globalData[key][dc]) globalData[key][dc] = [];
 
     let added = 0;
     pendingVoiceTasks.forEach(group => {
         if (!group.tasks.length) return;
-        const comp = companyList.find(c => c.name.toUpperCase() === group.company);
+        const day = group.dayCode || todayCode() || 'mon';
+        if (!globalData[key][day]) globalData[key][day] = [];
+
+        const comp = companyList.find(c => c.name.toUpperCase() === group.company.toUpperCase());
         const bg = comp?.color || '#E5E7EB';
         const col = getContrast(bg);
 
-        // Add header if not already present for today
-        const dayData = globalData[key][dc];
+        const dayData = globalData[key][day];
         const hasHeader = dayData.some(t => t.isHeader && t.tag?.name === group.company);
         if (!hasHeader) {
             dayData.push({ txt:'', done:false, isHeader:true, tag:{ name:group.company, bg, col, bd:bg } });
         }
-
         group.tasks.forEach(t => {
             if (t.trim()) { dayData.push({ txt: t.trim(), done: false }); added++; }
         });
@@ -1160,7 +1220,9 @@ window.confirmVoiceTasks = function() {
 
     closeModal('voiceModal');
     resetVoice();
-    showToast(`✓ ${added} task aggiunt${added===1?'o':'i'} per oggi`);
+    const dayNames = {mon:'lunedì',tue:'martedì',wed:'mercoledì',thu:'giovedì',fri:'venerdì'};
+    const days = [...new Set(pendingVoiceTasks.map(g=>dayNames[g.dayCode]||'oggi'))].join(', ');
+    showToast(`✓ ${added} task aggiunt${added===1?'o':'i'} — ${days}`);
 };
 
 window.resetVoice = function() {
