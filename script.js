@@ -936,58 +936,173 @@ async function processVoiceTranscript() {
     const transcriptEl = document.getElementById('voiceTranscript');
     if (transcriptEl) transcriptEl.innerText = `"${voiceTranscript}"`;
 
-    const companiesCtx = companyList.length
-        ? `Aziende disponibili: ${companyList.map(c=>c.name).join(', ')}.`
-        : 'Non ci sono aziende registrate, usa il nome esatto che senti nella frase.';
+    // Try local parsing first (no CORS issues, instant)
+    const localResult = parseVoiceLocally(voiceTranscript);
 
-    const prompt = `Sei un assistente che analizza testo vocale e crea task lavorativi.
+    if (localResult.length > 0) {
+        pendingVoiceTasks = localResult;
+        renderVoicePreview();
+        voiceSetState('voiceResult');
+        return;
+    }
+
+    // Fallback: try Claude API
+    try {
+        const companiesCtx = companyList.length
+            ? `Aziende disponibili: ${companyList.map(c=>c.name).join(', ')}.`
+            : 'Nessuna azienda registrata, usa il nome che senti.';
+
+        const prompt = `Sei un assistente che analizza testo vocale e crea task lavorativi.
 ${companiesCtx}
 Testo vocale: "${voiceTranscript}"
+Estrai aziende e task. Abbina ogni azienda a quelle disponibili (ignora maiuscole, accetta varianti fonetiche).
+Rispondi SOLO con JSON array, zero testo extra:
+[{"company":"NOME","tasks":["task1","task2"]}]
+Se niente trovato: []`;
 
-Estrai le aziende e i loro task. Abbina ogni azienda a quelle disponibili (ignora maiuscole/minuscole, accetta varianti fonetico-simili es. "gearks pro" → GEARXPRO).
-Rispondi SOLO con un array JSON valido, nessun testo prima o dopo:
-[{"company":"NOME_AZIENDA","tasks":["task1","task2"]}]
-Se non riesci a identificare aziende o task, rispondi: []`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
 
-    try {
         const res = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
+            signal: controller.signal,
             headers: {
                 "Content-Type": "application/json",
                 "anthropic-dangerous-direct-browser-ipc": "true"
             },
             body: JSON.stringify({
                 model: CLAUDE_MODEL,
-                max_tokens: 1000,
+                max_tokens: 500,
                 messages: [{ role: "user", content: prompt }]
             })
         });
+        clearTimeout(timeout);
+
+        if (!res.ok) throw new Error('API ' + res.status);
         const data = await res.json();
         const raw = data.content?.map(c => c.text || '').join('').trim() || '[]';
-
-        // Strip markdown fences if present
         const clean = raw.replace(/```json|```/g, '').trim();
         const parsed = JSON.parse(clean);
 
-        if (!Array.isArray(parsed) || parsed.length === 0) {
-            voiceSetState('voiceError');
-            document.getElementById('voiceErrorMsg').innerText = 'Non ho trovato task o aziende nel testo. Riprova con frasi tipo: "Per GearXPro controlla il PPC"';
-            return;
-        }
+        if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('empty');
 
-        // Attach company colors
         pendingVoiceTasks = parsed.map(item => {
             const comp = companyList.find(c => c.name.toUpperCase() === item.company.toUpperCase());
             return { company: item.company.toUpperCase(), color: comp?.color || '#E5E7EB', tasks: item.tasks };
         });
-
         renderVoicePreview();
         voiceSetState('voiceResult');
 
     } catch(e) {
-        voiceSetState('voiceError');
-        document.getElementById('voiceErrorMsg').innerText = 'Errore durante l\'elaborazione. Controlla la connessione e riprova.';
+        // If API fails, show what we transcribed and let user assign manually
+        showVoiceManual();
     }
+}
+
+// ── Local voice parser ───────────────────────────────────────
+// Splits transcript by company keywords, no API needed
+function parseVoiceLocally(text) {
+    if (!companyList.length) return [];
+
+    const result = [];
+    const t = text.toLowerCase();
+
+    // Build triggers: each company name + common prepositions before it
+    // e.g. "per gearxpro", "gearxpro:", "riguardo gearxpro"
+    const triggers = ['per ', 'per la ', 'per il ', 'riguardo ', 'su ', ''];
+
+    // Find positions of each company mention
+    const mentions = [];
+    companyList.forEach(comp => {
+        const name = comp.name.toLowerCase();
+        // Also try fuzzy: remove vowels for phonetic similarity
+        triggers.forEach(trigger => {
+            let idx = t.indexOf(trigger + name);
+            while (idx !== -1) {
+                mentions.push({ pos: idx, company: comp, trigLen: trigger.length + name.length });
+                idx = t.indexOf(trigger + name, idx + 1);
+            }
+        });
+    });
+
+    if (mentions.length === 0) return [];
+
+    // Sort by position
+    mentions.sort((a, b) => a.pos - b.pos);
+
+    // Remove duplicates (same company, close position)
+    const deduped = [];
+    mentions.forEach(m => {
+        const last = deduped[deduped.length - 1];
+        if (!last || last.company.name !== m.company.name || m.pos - last.pos > 20) {
+            deduped.push(m);
+        }
+    });
+
+    // Extract text segments between company mentions
+    deduped.forEach((mention, i) => {
+        const segStart = mention.pos + mention.trigLen;
+        const segEnd = deduped[i + 1] ? deduped[i + 1].pos : text.length;
+        const segment = text.slice(segStart, segEnd).trim();
+
+        // Split segment into tasks by conjunctions and punctuation
+        const tasks = segment
+            .split(/[,;\.]\s*|\s+e\s+|\s+anche\s+|\s+poi\s+|\s+inoltre\s+/i)
+            .map(t => t.trim())
+            .filter(t => t.length > 2 && !/^(e|il|la|lo|i|gli|le|un|una|del|della|dei|degli|delle)$/i.test(t));
+
+        if (tasks.length > 0) {
+            // Capitalize first letter of each task
+            const cleanTasks = tasks.map(t => t.charAt(0).toUpperCase() + t.slice(1));
+            const existing = result.find(r => r.company === mention.company.name);
+            if (existing) {
+                existing.tasks.push(...cleanTasks);
+            } else {
+                result.push({
+                    company: mention.company.name,
+                    color: mention.company.color,
+                    tasks: cleanTasks
+                });
+            }
+        }
+    });
+
+    return result;
+}
+
+// ── Manual fallback: show transcript, let user assign company ─
+function showVoiceManual() {
+    const el = document.getElementById('voiceResult');
+    if (!el) return;
+
+    const companyOptions = companyList.map((c,i) => `<option value="${i}">${c.name}</option>`).join('');
+
+    // Split transcript into task lines
+    const lines = voiceTranscript
+        .split(/[,;\.]\s+|\s+e\s+/i)
+        .map(l => l.trim())
+        .filter(l => l.length > 2);
+
+    pendingVoiceTasks = [{ company: companyList[0]?.name || '', color: companyList[0]?.color || '#E5E7EB', tasks: lines }];
+
+    document.getElementById('voicePreview').innerHTML = `
+        <div style="margin-bottom:12px;">
+            <p style="font-size:12px;color:var(--c-text-2);margin-bottom:8px;">Non ho riconosciuto aziende automaticamente. Assegna manualmente:</p>
+            <select onchange="pendingVoiceTasks[0].company=companyList[this.value]?.name||'';pendingVoiceTasks[0].color=companyList[this.value]?.color||'#E5E7EB';"
+                style="width:100%;padding:8px;border:1px solid var(--c-border);border-radius:6px;background:var(--c-bg);color:var(--c-text);font-family:var(--font);font-size:13px;margin-bottom:10px;">
+                ${companyList.length ? companyOptions : '<option>Nessuna azienda salvata</option>'}
+            </select>
+        </div>
+        ${lines.map((t,i) => `
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--c-border);">
+                <div style="width:14px;height:14px;border:1.5px solid var(--c-border-2);border-radius:3px;flex-shrink:0;"></div>
+                <input value="${escAttr(t)}" oninput="pendingVoiceTasks[0].tasks[${i}]=this.value"
+                    style="flex:1;border:none;background:transparent;font-family:var(--font);font-size:13px;color:var(--c-text);outline:none;">
+                <button onclick="pendingVoiceTasks[0].tasks.splice(${i},1);showVoiceManual();"
+                    style="background:none;border:none;color:var(--c-text-3);cursor:pointer;font-size:16px;">×</button>
+            </div>`).join('')}`;
+
+    voiceSetState('voiceResult');
 }
 
 function renderVoicePreview() {
