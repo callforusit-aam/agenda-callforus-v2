@@ -383,14 +383,25 @@ function updateDateDisplay() {
     const wr=document.getElementById('currentWeekRange'); if(wr) wr.innerText=strWeek;
     const cd=document.getElementById('calDateDisplay'); if(cd) cd.innerText=strWeek;
 }
-window.changeWeek=async function(dir){
-    await saveData(true);
-    document.getElementById('loadingScreen').style.display='flex';
-    currentMon.setDate(currentMon.getDate()+(dir*7));
-    updateDateDisplay(); activeFilter=null; clearFilterBadge();
-    loadData(false);
+window.changeWeek = function(dir) {
+    // Save current state to cache immediately (no await, no spinner)
+    deferredSave();
+
+    // Move week instantly
+    currentMon.setDate(currentMon.getDate() + (dir * 7));
+    updateDateDisplay();
+    activeFilter = null;
+    clearFilterBadge();
+
+    // Render instantly from cache (already in globalData)
+    renderCalendar();
+    renderDayTabsMobile();
+
+    // Sync in background without blocking UI
+    setStatus('sync');
+    loadData(true); // silent=true → no spinner, no blocking
 };
-window.forceSync=()=>{ document.getElementById('loadingScreen').style.display='flex'; loadData(false); };
+window.forceSync = () => { document.getElementById('loadingScreen').style.display='flex'; loadData(false); };
 window.toggleTheme=()=>{
     const d=document.body.getAttribute('data-theme')==='dark';
     document.body.setAttribute('data-theme',d?'light':'dark');
@@ -1054,28 +1065,60 @@ function parseVoiceLocally(text) {
     if (!companyList.length) return [];
     const result = [];
     const t = text.toLowerCase();
-    const dayToCode = {
+    const words = t.split(/\s+/);
+
+    // ── 1. Detect day from text ──────────────────────────────
+    let detectedDay = todayCode() || 'mon';
+
+    // Named days
+    const dayMap = {
         'lunedì':'mon','lunedi':'mon','lun':'mon',
         'martedì':'tue','martedi':'tue','mar':'tue',
         'mercoledì':'wed','mercoledi':'wed','mer':'wed',
         'giovedì':'thu','giovedi':'thu','gio':'thu',
         'venerdì':'fri','venerdi':'fri','ven':'fri',
-        'domani': getDayCode(1), 'dopodomani': getDayCode(2), 'oggi': todayCode()||'mon'
+        'domani': getDayCode(1),
+        'dopodomani': getDayCode(2),
+        'oggi': todayCode() || 'mon'
     };
+    // Check longest match first to avoid "mar" matching inside "martedì"
+    Object.keys(dayMap).sort((a,b) => b.length - a.length).forEach(keyword => {
+        if (t.includes(keyword)) { detectedDay = dayMap[keyword]; }
+    });
 
-    // Find company mentions with fuzzy
-    const words = t.split(/\s+/);
+    // "il 27", "il 27 aprile", "per il 28" → match day number in current week
+    const dateNumMatch = t.match(/\bil\s+(\d{1,2})\b/);
+    if (dateNumMatch) {
+        const dayNum = parseInt(dateNumMatch[1]);
+        for (let i = 0; i < 5; i++) {
+            const d = new Date(currentMon); d.setDate(currentMon.getDate() + i);
+            if (d.getDate() === dayNum) {
+                detectedDay = ['mon','tue','wed','thu','fri'][i];
+                break;
+            }
+        }
+        // Also check next week if not found
+        if (detectedDay === (todayCode() || 'mon')) {
+            for (let i = 0; i < 5; i++) {
+                const d = new Date(currentMon); d.setDate(currentMon.getDate() + 7 + i);
+                if (d.getDate() === dayNum) {
+                    detectedDay = ['mon','tue','wed','thu','fri'][i];
+                    break;
+                }
+            }
+        }
+    }
+
+    // ── 2. Find company mentions with fuzzy matching ──────────
     const mentions = [];
-
     companyList.forEach(comp => {
         const cn = comp.name.toLowerCase().replace(/\s+/g,'');
-        // try exact and word-by-word
-        for (let i=0; i<words.length; i++) {
+        for (let i = 0; i < words.length; i++) {
             const w = words[i].replace(/[^a-z0-9]/g,'');
-            if (!w) continue;
+            if (!w || w.length < 2) continue;
             const dist = levenshtein(w, cn);
-            const threshold = Math.max(1, Math.floor(cn.length * 0.35));
-            if (dist <= threshold || cn.includes(w) || w.includes(cn.substring(0,4))) {
+            const threshold = Math.max(1, Math.floor(cn.length * 0.38));
+            if (dist <= threshold || (cn.length > 4 && w.length > 3 && cn.startsWith(w.substring(0,4)))) {
                 mentions.push({ wordIdx: i, company: comp });
                 break;
             }
@@ -1085,30 +1128,21 @@ function parseVoiceLocally(text) {
     if (!mentions.length) return [];
     mentions.sort((a,b) => a.wordIdx - b.wordIdx);
 
-    // Detect day in text
-    let detectedDay = todayCode() || 'mon';
-    Object.entries(dayToCode).forEach(([keyword, code]) => {
-        if (t.includes(keyword)) detectedDay = code;
-    });
-    // detect "il NN" date pattern
-    const dateMatch = t.match(/il\s+(\d{1,2})/);
-    if (dateMatch) {
-        const dayNum = parseInt(dateMatch[1]);
-        const days = ['mon','tue','wed','thu','fri'];
-        for (let i=0;i<5;i++) {
-            const d = new Date(currentMon); d.setDate(currentMon.getDate()+i);
-            if (d.getDate() === dayNum) { detectedDay = days[i]; break; }
-        }
-    }
-
+    // ── 3. Extract tasks per company ─────────────────────────
     mentions.forEach((mention, i) => {
         const segStart = mention.wordIdx + 1;
         const segEnd = mentions[i+1] ? mentions[i+1].wordIdx : words.length;
-        const segment = words.slice(segStart, segEnd).join(' ').replace(/^(per|e|anche|poi|,)\s*/i,'').trim();
+        let segment = words.slice(segStart, segEnd)
+            .join(' ')
+            .replace(/^(per|e|anche|poi|,|:)\s*/i,'')
+            // Remove date references from task text
+            .replace(/\bil\s+\d{1,2}(\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre))?\b/gi,'')
+            .replace(/\b(lunedì|martedì|mercoledì|giovedì|venerdì|lunedi|martedi|mercoledi|giovedi|venerdi|domani|dopodomani|oggi)\b/gi,'')
+            .replace(/\s+/g,' ').trim();
 
         const tasks = segment
             .split(/[,;]\s*|\s+e\s+|\s+poi\s+/i)
-            .map(t => t.replace(/\b(il|lo|la|i|gli|le|un|una)\b/gi,'').trim())
+            .map(t => t.replace(/\b(il|lo|la|i|gli|le|un|una)\b\s*/gi,'').trim())
             .filter(t => t.length > 2);
 
         const cleanTasks = tasks.map(t => t.charAt(0).toUpperCase() + t.slice(1));
