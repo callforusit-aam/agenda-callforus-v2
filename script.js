@@ -660,25 +660,29 @@ window.dragDrop=function(e,tDay,tIdx){
 };
 
 // ═══════════════════════════════════════════════════════════
-// GROUP MODAL
 // ═══════════════════════════════════════════════════════════
-window.openModal=function(id){document.getElementById(id).classList.add('open');};
-window.closeModal=function(id){document.getElementById(id).classList.remove('open');};
-function closeAllModals(){document.querySelectorAll('.modal-bg.open').forEach(m=>m.classList.remove('open'));}
-document.addEventListener('click',e=>{if(e.target.classList.contains('modal-bg'))e.target.classList.remove('open');});
-
-// pre-fill group modal
-const _origOpenModal=window.openModal;
-window.openModal=function(id){
-    if(id==='groupModal'){
-        const sel=document.getElementById('formCompany');
-        sel.innerHTML=!companyList.length?'<option>Crea prima un\'azienda</option>':companyList.map((c,i)=>`<option value="${i}">${c.name}</option>`).join('');
-        const dc=isMobile()?mobileActiveDay:(todayCode()||'mon');
-        document.getElementById('formDay').value=dc;
-        setTimeout(()=>document.getElementById('formTasks').focus(),200);
+// MODALS
+// ═══════════════════════════════════════════════════════════
+window.openModal = function(id) {
+    const el = document.getElementById(id);
+    if (!el) { console.error('Modal not found:', id); return; }
+    // group modal pre-fill
+    if (id === 'groupModal') {
+        const sel = document.getElementById('formCompany');
+        sel.innerHTML = !companyList.length
+            ? '<option>Crea prima un\'azienda</option>'
+            : companyList.map((c,i) => `<option value="${i}">${c.name}</option>`).join('');
+        const dc = isMobile() ? mobileActiveDay : (todayCode() || 'mon');
+        document.getElementById('formDay').value = dc;
+        setTimeout(() => document.getElementById('formTasks').focus(), 200);
     }
-    document.getElementById(id).classList.add('open');
+    el.classList.add('open');
 };
+window.closeModal = function(id) {
+    const el = document.getElementById(id); if (el) el.classList.remove('open');
+};
+function closeAllModals() { document.querySelectorAll('.modal-bg.open').forEach(m => m.classList.remove('open')); }
+document.addEventListener('click', e => { if (e.target.classList.contains('modal-bg')) e.target.classList.remove('open'); });
 
 window.saveFromForm=function(){
     const day=document.getElementById('formDay').value;
@@ -869,10 +873,16 @@ function voiceSetState(state) {
 }
 
 window.toggleVoice = function() {
-    openModal('voiceModal');
-    voiceSetState('voiceIdle');
+    const modal = document.getElementById('voiceModal');
+    if (!modal) { showToast('Errore: modal non trovato'); return; }
     voiceTranscript = '';
     pendingVoiceTasks = [];
+    // reset all states
+    ['voiceIdle','voiceRecording','voiceProcessing','voiceResult','voiceError']
+        .forEach(id => { const el=document.getElementById(id); if(el) el.style.display='none'; });
+    const idle = document.getElementById('voiceIdle');
+    if (idle) idle.style.display = 'block';
+    modal.classList.add('open');
 };
 
 window.startVoice = function() {
