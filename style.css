@@ -627,6 +627,18 @@ input[type="color"] { width: 26px; height: 26px; border: 1px solid var(--c-borde
 .qa-input::placeholder { color: var(--c-border-2); }
 .qa-hint { font-size: 11px; color: var(--c-text-3); margin-top: 10px; font-family: var(--mono); }
 
+/* voice */
+@keyframes voicePulse {
+    0%,100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239,68,68,.4); }
+    50% { transform: scale(1.05); box-shadow: 0 0 0 12px rgba(239,68,68,0); }
+}
+.icon-btn.recording {
+    background: var(--c-red) !important;
+    border-color: var(--c-red) !important;
+    color: #fff !important;
+    animation: voicePulse .9s ease infinite;
+}
+
 /* export modal */
 .export-modal { max-width: 340px; }
 

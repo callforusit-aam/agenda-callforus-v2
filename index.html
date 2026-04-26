@@ -90,6 +90,70 @@
     </div>
 </div>
 
+<!-- ══ VOICE MODAL ══════════════════════════════════════════ -->
+<div id="voiceModal" class="modal-bg">
+    <div class="modal" style="max-width:480px;text-align:center;">
+        <div class="modal-head" style="justify-content:center;border-bottom:1px solid var(--c-border);padding-bottom:14px;margin-bottom:18px;">
+            <span class="modal-title">Aggiungi task con la voce</span>
+        </div>
+
+        <!-- Recording state -->
+        <div id="voiceRecording" style="display:none;">
+            <div id="voicePulse" style="width:72px;height:72px;border-radius:50%;background:var(--c-red);display:grid;place-items:center;margin:0 auto 16px;animation:voicePulse 1s ease infinite;">
+                <span class="material-icons-round" style="font-size:32px;color:#fff;">mic</span>
+            </div>
+            <p style="font-size:13px;font-weight:600;color:var(--c-text);">Sto ascoltando...</p>
+            <p style="font-size:12px;color:var(--c-text-2);margin-top:4px;">Parla liberamente, es: "Per GearXPro controlla il PPC e per Calugi il report ADV"</p>
+            <button class="btn btn-ghost" onclick="stopVoice()" style="margin-top:18px;width:100%;justify-content:center;">
+                <span class="material-icons-round">stop</span> Ferma registrazione
+            </button>
+        </div>
+
+        <!-- Transcript + processing -->
+        <div id="voiceProcessing" style="display:none;">
+            <div class="loader" style="margin:0 auto 16px;"></div>
+            <p style="font-size:13px;font-weight:600;color:var(--c-text);">Claude sta elaborando...</p>
+            <div id="voiceTranscript" style="margin-top:12px;padding:12px;background:var(--c-bg);border-radius:var(--radius-sm);font-size:12px;color:var(--c-text-2);text-align:left;line-height:1.5;border:1px solid var(--c-border);"></div>
+        </div>
+
+        <!-- Result preview -->
+        <div id="voiceResult" style="display:none;">
+            <span class="material-icons-round" style="font-size:40px;color:var(--c-green);margin-bottom:10px;display:block;">check_circle</span>
+            <p style="font-size:14px;font-weight:700;margin-bottom:14px;">Ecco i task riconosciuti:</p>
+            <div id="voicePreview" style="text-align:left;margin-bottom:18px;max-height:260px;overflow-y:auto;"></div>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-ghost" onclick="resetVoice()" style="flex:1;justify-content:center;">Riprova</button>
+                <button class="btn btn-primary" onclick="confirmVoiceTasks()" style="flex:1;justify-content:center;">
+                    <span class="material-icons-round">add_task</span> Inserisci nel calendario
+                </button>
+            </div>
+        </div>
+
+        <!-- Error state -->
+        <div id="voiceError" style="display:none;">
+            <span class="material-icons-round" style="font-size:40px;color:var(--c-red);margin-bottom:10px;display:block;">error_outline</span>
+            <p id="voiceErrorMsg" style="font-size:13px;color:var(--c-text-2);margin-bottom:16px;"></p>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-ghost" onclick="closeModal('voiceModal')" style="flex:1;justify-content:center;">Chiudi</button>
+                <button class="btn btn-primary" onclick="resetVoice()" style="flex:1;justify-content:center;">Riprova</button>
+            </div>
+        </div>
+
+        <!-- Idle state (initial) -->
+        <div id="voiceIdle">
+            <div style="width:72px;height:72px;border-radius:50%;background:var(--c-accent-bg);display:grid;place-items:center;margin:0 auto 16px;">
+                <span class="material-icons-round" style="font-size:32px;color:var(--c-accent);">mic</span>
+            </div>
+            <p style="font-size:13px;color:var(--c-text-2);margin-bottom:6px;">Premi il bottone e parla.</p>
+            <p style="font-size:12px;color:var(--c-text-3);margin-bottom:20px;line-height:1.5;">Claude riconoscerà le aziende e creerà i task automaticamente nel giorno di oggi.</p>
+            <button class="btn btn-primary" onclick="startVoice()" style="width:100%;justify-content:center;height:46px;font-size:14px;">
+                <span class="material-icons-round">mic</span> Inizia registrazione
+            </button>
+            <button class="btn btn-ghost" onclick="closeModal('voiceModal')" style="width:100%;justify-content:center;margin-top:8px;">Annulla</button>
+        </div>
+    </div>
+</div>
+
 <!-- ══ APP SHELL ══════════════════════════════════════════════ -->
 <div id="app-shell" style="display:none;">
 
@@ -136,6 +200,9 @@
             <button class="icon-btn" onclick="manualSave()" title="Salva (S)"><span class="material-icons-round">save</span></button>
             <button class="icon-btn" onclick="forceSync()" title="Ricarica"><span class="material-icons-round">refresh</span></button>
             <button class="icon-btn" onclick="openExport()" title="Esporta (E)"><span class="material-icons-round">download</span></button>
+            <button class="icon-btn" id="voiceBtn" onclick="toggleVoice()" title="Aggiungi task con la voce" style="position:relative;">
+                <span class="material-icons-round">mic</span>
+            </button>
             <a href="https://calendar.google.com/calendar/u/0/r/eventedit?v=2" target="_blank" class="btn btn-primary">
                 <span class="material-icons-round">add</span> Organizza Call
             </a>

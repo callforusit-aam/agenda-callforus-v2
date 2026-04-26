@@ -853,3 +853,193 @@ window.exportPrint=function(){
     html+=`</body></html>`;
     const win=window.open('','_blank');win.document.write(html);win.document.close();setTimeout(()=>win.print(),400);
 };
+
+// ═══════════════════════════════════════════════════════════
+// VOICE INPUT
+// ═══════════════════════════════════════════════════════════
+let recognition = null;
+let voiceTranscript = '';
+let pendingVoiceTasks = []; // [{company, color, tasks:[]}]
+
+function voiceSetState(state) {
+    ['voiceIdle','voiceRecording','voiceProcessing','voiceResult','voiceError']
+        .forEach(id => { const el=document.getElementById(id); if(el) el.style.display='none'; });
+    const el = document.getElementById(state);
+    if (el) el.style.display = 'block';
+}
+
+window.toggleVoice = function() {
+    openModal('voiceModal');
+    voiceSetState('voiceIdle');
+    voiceTranscript = '';
+    pendingVoiceTasks = [];
+};
+
+window.startVoice = function() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        voiceSetState('voiceError');
+        document.getElementById('voiceErrorMsg').innerText = 'Il tuo browser non supporta la registrazione vocale. Usa Chrome o Safari.';
+        return;
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.lang = 'it-IT';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    const btn = document.getElementById('voiceBtn');
+    if (btn) btn.classList.add('recording');
+    voiceSetState('voiceRecording');
+    voiceTranscript = '';
+
+    recognition.onresult = e => {
+        voiceTranscript = Array.from(e.results).map(r => r[0].transcript).join(' ');
+    };
+
+    recognition.onerror = e => {
+        if (btn) btn.classList.remove('recording');
+        voiceSetState('voiceError');
+        document.getElementById('voiceErrorMsg').innerText =
+            e.error === 'not-allowed'
+                ? 'Microfono non autorizzato. Controlla i permessi del browser.'
+                : `Errore: ${e.error}. Riprova.`;
+    };
+
+    recognition.onend = () => {
+        if (btn) btn.classList.remove('recording');
+        if (voiceTranscript.trim()) processVoiceTranscript();
+        else { voiceSetState('voiceError'); document.getElementById('voiceErrorMsg').innerText = 'Non ho sentito nulla. Riprova parlando più vicino al microfono.'; }
+    };
+
+    recognition.start();
+};
+
+window.stopVoice = function() {
+    if (recognition) recognition.stop();
+    const btn = document.getElementById('voiceBtn');
+    if (btn) btn.classList.remove('recording');
+};
+
+async function processVoiceTranscript() {
+    voiceSetState('voiceProcessing');
+    const transcriptEl = document.getElementById('voiceTranscript');
+    if (transcriptEl) transcriptEl.innerText = `"${voiceTranscript}"`;
+
+    const companiesCtx = companyList.length
+        ? `Aziende disponibili: ${companyList.map(c=>c.name).join(', ')}.`
+        : 'Non ci sono aziende registrate, usa il nome esatto che senti nella frase.';
+
+    const prompt = `Sei un assistente che analizza testo vocale e crea task lavorativi.
+${companiesCtx}
+Testo vocale: "${voiceTranscript}"
+
+Estrai le aziende e i loro task. Abbina ogni azienda a quelle disponibili (ignora maiuscole/minuscole, accetta varianti fonetico-simili es. "gearks pro" → GEARXPRO).
+Rispondi SOLO con un array JSON valido, nessun testo prima o dopo:
+[{"company":"NOME_AZIENDA","tasks":["task1","task2"]}]
+Se non riesci a identificare aziende o task, rispondi: []`;
+
+    try {
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "anthropic-dangerous-direct-browser-ipc": "true"
+            },
+            body: JSON.stringify({
+                model: CLAUDE_MODEL,
+                max_tokens: 1000,
+                messages: [{ role: "user", content: prompt }]
+            })
+        });
+        const data = await res.json();
+        const raw = data.content?.map(c => c.text || '').join('').trim() || '[]';
+
+        // Strip markdown fences if present
+        const clean = raw.replace(/```json|```/g, '').trim();
+        const parsed = JSON.parse(clean);
+
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+            voiceSetState('voiceError');
+            document.getElementById('voiceErrorMsg').innerText = 'Non ho trovato task o aziende nel testo. Riprova con frasi tipo: "Per GearXPro controlla il PPC"';
+            return;
+        }
+
+        // Attach company colors
+        pendingVoiceTasks = parsed.map(item => {
+            const comp = companyList.find(c => c.name.toUpperCase() === item.company.toUpperCase());
+            return { company: item.company.toUpperCase(), color: comp?.color || '#E5E7EB', tasks: item.tasks };
+        });
+
+        renderVoicePreview();
+        voiceSetState('voiceResult');
+
+    } catch(e) {
+        voiceSetState('voiceError');
+        document.getElementById('voiceErrorMsg').innerText = 'Errore durante l\'elaborazione. Controlla la connessione e riprova.';
+    }
+}
+
+function renderVoicePreview() {
+    const el = document.getElementById('voicePreview'); if (!el) return;
+    el.innerHTML = pendingVoiceTasks.map((group, gi) => {
+        const comp = companyList.find(c => c.name.toUpperCase() === group.company);
+        const bg = comp?.color || '#E5E7EB';
+        const col = getContrast(bg);
+        const tasksHtml = group.tasks.map((t, ti) => `
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--c-border);">
+                <div style="width:14px;height:14px;border:1.5px solid var(--c-border-2);border-radius:3px;flex-shrink:0;"></div>
+                <input value="${escAttr(t)}" oninput="pendingVoiceTasks[${gi}].tasks[${ti}]=this.value"
+                    style="flex:1;border:none;background:transparent;font-family:var(--font);font-size:13px;color:var(--c-text);outline:none;">
+                <button onclick="pendingVoiceTasks[${gi}].tasks.splice(${ti},1);renderVoicePreview();"
+                    style="background:none;border:none;color:var(--c-text-3);cursor:pointer;font-size:16px;line-height:1;padding:0;">×</button>
+            </div>`).join('');
+        return `
+            <div style="margin-bottom:14px;">
+                <span style="display:inline-block;background:${bg};color:${col};font-size:10px;font-weight:700;letter-spacing:.06em;padding:3px 9px;border-radius:4px;margin-bottom:8px;text-transform:uppercase;">${group.company}</span>
+                ${tasksHtml}
+            </div>`;
+    }).join('');
+}
+
+window.confirmVoiceTasks = function() {
+    if (!pendingVoiceTasks.length) return;
+
+    const dc = todayCode() || 'mon';
+    const key = getWeekKey();
+    if (!globalData[key]) globalData[key] = {};
+    if (!globalData[key][dc]) globalData[key][dc] = [];
+
+    let added = 0;
+    pendingVoiceTasks.forEach(group => {
+        if (!group.tasks.length) return;
+        const comp = companyList.find(c => c.name.toUpperCase() === group.company);
+        const bg = comp?.color || '#E5E7EB';
+        const col = getContrast(bg);
+
+        // Add header if not already present for today
+        const dayData = globalData[key][dc];
+        const hasHeader = dayData.some(t => t.isHeader && t.tag?.name === group.company);
+        if (!hasHeader) {
+            dayData.push({ txt:'', done:false, isHeader:true, tag:{ name:group.company, bg, col, bd:bg } });
+        }
+
+        group.tasks.forEach(t => {
+            if (t.trim()) { dayData.push({ txt: t.trim(), done: false }); added++; }
+        });
+    });
+
+    saveData(true);
+    if (document.getElementById('page-calendar').classList.contains('active')) renderCalendar();
+    if (document.getElementById('page-home').classList.contains('active')) renderHome();
+
+    closeModal('voiceModal');
+    resetVoice();
+    showToast(`✓ ${added} task aggiunt${added===1?'o':'i'} per oggi`);
+};
+
+window.resetVoice = function() {
+    voiceTranscript = '';
+    pendingVoiceTasks = [];
+    voiceSetState('voiceIdle');
+};
