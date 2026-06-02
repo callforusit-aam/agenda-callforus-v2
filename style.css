@@ -627,6 +627,19 @@ input[type="color"] { width: 26px; height: 26px; border: 1px solid var(--c-borde
 .qa-input::placeholder { color: var(--c-border-2); }
 .qa-hint { font-size: 11px; color: var(--c-text-3); margin-top: 10px; font-family: var(--mono); }
 
+/* priority dot */
+.prio-dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    border: 1.5px solid var(--c-border-2);
+    cursor: pointer; flex-shrink: 0; margin-top: 4px;
+    transition: var(--trans);
+}
+.prio-dot:hover { transform: scale(1.3); }
+
+/* drag active state */
+.day-col.drag-active { outline: 1px dashed var(--c-border-2); outline-offset: -2px; }
+.day-col.drag-active .day-body { background: var(--c-bg); }
+
 /* voice */
 @keyframes voicePulse {
     0%,100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239,68,68,.4); }
