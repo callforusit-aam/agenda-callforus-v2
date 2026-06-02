@@ -946,23 +946,80 @@ window.deleteBacklogItem=function(idx){
 
 window.openScheduleFor=function(idx){
     pendingBacklogIdx=idx;
-    document.getElementById('scheduleDay').value=getSuggestedDay();
+    // default = next free day this week
+    const sug = getSuggestedDay();
+    const dayOffset = ['mon','tue','wed','thu','fri'].indexOf(sug);
+    const d = new Date(currentMon);
+    d.setDate(currentMon.getDate() + dayOffset);
+    const inp = document.getElementById('scheduleDate');
+    inp.value = toDateInputValue(d);
+    inp.min = toDateInputValue(new Date()); // no past dates
+    inp.onchange = updateScheduleDateInfo;
+    updateScheduleDateInfo();
     openModal('scheduleModal');
 };
+
+function toDateInputValue(date) {
+    const d = new Date(date);
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().split('T')[0];
+}
+
+function updateScheduleDateInfo() {
+    const val = document.getElementById('scheduleDate').value;
+    const info = document.getElementById('scheduleDateInfo');
+    if (!val || !info) return;
+    const d = new Date(val + 'T00:00:00');
+    const wd = d.getDay();
+    if (wd === 0 || wd === 6) {
+        info.innerHTML = '⚠️ È un weekend — verrà spostato al lunedì successivo.';
+        info.style.color = 'var(--c-yellow)';
+    } else {
+        const label = d.toLocaleDateString('it-IT', { weekday:'long', day:'numeric', month:'long' });
+        info.innerText = label.charAt(0).toUpperCase() + label.slice(1);
+        info.style.color = 'var(--c-text-3)';
+    }
+}
+
+// Convert any date → { weekKey, dayCode }
+function dateToWeekDay(date) {
+    let d = new Date(date);
+    let wd = d.getDay();
+    // weekend → move to next monday
+    if (wd === 0) d.setDate(d.getDate() + 1);      // sun → mon
+    else if (wd === 6) d.setDate(d.getDate() + 2); // sat → mon
+    wd = d.getDay();
+    const dayCode = ['','mon','tue','wed','thu','fri'][wd];
+    // compute monday of that week
+    const mon = new Date(d);
+    mon.setDate(d.getDate() - wd + 1);
+    mon.setHours(0,0,0,0);
+    const weekKey = "W_" + mon.toISOString().split('T')[0];
+    return { weekKey, dayCode };
+}
+
 window.confirmSchedule=function(){
     if(pendingBacklogIdx===null)return;
     const l=getBacklog(),item=l[pendingBacklogIdx];if(!item)return;
-    const day=document.getElementById('scheduleDay').value,key=getWeekKey();
-    if(!globalData[key])globalData[key]={};
-    if(!globalData[key][day])globalData[key][day]=[];
+    const dateVal=document.getElementById('scheduleDate').value;
+    if(!dateVal){showToast('Seleziona una data');return;}
+
+    const {weekKey,dayCode}=dateToWeekDay(new Date(dateVal+'T00:00:00'));
+    if(!globalData[weekKey])globalData[weekKey]={};
+    if(!globalData[weekKey][dayCode])globalData[weekKey][dayCode]=[];
+
     const comp=companyList.find(c=>c.name===item.company);
     const bg=comp?comp.color:'#E5E7EB',col=getContrast(bg);
-    const dd=globalData[key][day];
+    const dd=globalData[weekKey][dayCode];
     if(!dd.some(t=>t.isHeader&&t.tag?.name===item.company)) dd.push({txt:'',done:false,isHeader:true,tag:{name:item.company,bg,col,bd:bg}});
     dd.push({txt:item.text,done:false});
+
     l.splice(pendingBacklogIdx,1);saveBacklog(l);renderBacklog();closeModal('scheduleModal');
     renderCalGrid();renderDayTabsMobile();
-    showToast(`Spostato a ${dayLabel(day)}`);
+
+    const d=new Date(dateVal+'T00:00:00');
+    const label=d.toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'});
+    showToast(`✓ Fissato: ${label}`);
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -1492,14 +1549,29 @@ window.applyAllTemplates = function() {
         const bg = comp?.color || '#E5E7EB';
         const col = getContrast(bg);
 
-        // add header if missing
-        if (!dayData.some(t => t.isHeader && t.tag?.name === tmpl.company)) {
+        // Find this company's header position; add if missing
+        let headerIdx = dayData.findIndex(t => t.isHeader && t.tag?.name === tmpl.company);
+        if (headerIdx === -1) {
             dayData.push({ txt:'', done:false, isHeader:true, tag:{ name:tmpl.company, bg, col, bd:bg } });
+            headerIdx = dayData.length - 1;
         }
+
+        // Collect existing task texts ONLY within this company's group
+        const groupTexts = [];
+        for (let i = headerIdx + 1; i < dayData.length; i++) {
+            if (dayData[i].isHeader) break; // next company starts
+            if (dayData[i].txt) groupTexts.push(dayData[i].txt.toLowerCase().trim());
+        }
+
+        // Find where this group ends (to insert tasks at the right place)
+        let insertAt = headerIdx + 1;
+        while (insertAt < dayData.length && !dayData[insertAt].isHeader) insertAt++;
+
         tmpl.tasks.forEach(t => {
-            // avoid exact duplicates
-            if (!dayData.some(x => !x.isHeader && x.txt === t)) {
-                dayData.push({ txt: t, done: false });
+            // duplicate check scoped to this company group only
+            if (!groupTexts.includes(t.toLowerCase().trim())) {
+                dayData.splice(insertAt, 0, { txt: t, done: false });
+                insertAt++;
                 added++;
             }
         });

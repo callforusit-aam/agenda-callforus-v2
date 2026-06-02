@@ -55,17 +55,15 @@
 
 <!-- ══ MODAL: Pianifica backlog ══════════════════════════════ -->
 <div id="scheduleModal" class="modal-bg">
-    <div class="modal" style="max-width:320px;">
+    <div class="modal" style="max-width:340px;">
         <div class="modal-head">
             <span class="modal-title">Pianifica attività</span>
             <button class="modal-close" onclick="closeModal('scheduleModal')"><span class="material-icons-round">close</span></button>
         </div>
-        <p style="font-size:12px;color:var(--c-text-2);margin-bottom:14px;">Scegli il giorno in cui spostare questa attività:</p>
-        <label class="form-label">Giorno</label>
-        <select id="scheduleDay" class="modal-select">
-            <option value="mon">Lunedì</option><option value="tue">Martedì</option>
-            <option value="wed">Mercoledì</option><option value="thu">Giovedì</option><option value="fri">Venerdì</option>
-        </select>
+        <p style="font-size:12px;color:var(--c-text-2);margin-bottom:14px;">Scegli la data in cui fissare questa attività. Puoi pianificare anche settimane in anticipo.</p>
+        <label class="form-label">Data</label>
+        <input type="date" id="scheduleDate" class="modal-select" style="cursor:pointer;">
+        <p id="scheduleDateInfo" style="font-size:11px;color:var(--c-text-3);margin:-6px 0 14px;"></p>
         <button class="btn btn-primary" onclick="confirmSchedule()" style="width:100%;justify-content:center;">
             <span class="material-icons-round">event_available</span> Fissa nel calendario
         </button>
