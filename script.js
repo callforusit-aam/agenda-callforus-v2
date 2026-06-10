@@ -615,6 +615,7 @@ function renderCalGrid() {
                     ondragover="dragOver(event)" ondrop="dragDrop(event,'${code}',${ri})">
                     <span class="co-header-tag" style="background:${bg};color:${col};">${escAttr(task.tag?.name||'')}</span>
                     <span class="co-header-line"></span>
+                    <button class="co-add-task" onclick="addTaskToGroup('${code}',${ri})" title="Aggiungi attività a ${escAttr(task.tag?.name||'')}"><span class="material-icons-round" style="font-size:15px;">add</span></button>
                     <button class="co-del" onclick="deleteTask(event,'${code}',${ri})" title="Elimina gruppo"><span class="material-icons-round" style="font-size:13px;">delete</span></button>
                 </div>`;
             }
@@ -717,6 +718,33 @@ window.addTaskManually=function(day,val){
     globalData[key][day].push({txt:val.trim(),done:false});
     saveData(true); renderCalGrid(); renderDayTabsMobile();
     if(document.getElementById('page-home').classList.contains('active')) renderHome();
+};
+
+// Add an empty task directly under a company group header
+window.addTaskToGroup=function(day, headerIdx){
+    const key=getWeekKey();
+    if(!globalData[key]?.[day]) return;
+    const list=globalData[key][day];
+
+    // find end of this group (next header or end of array)
+    let insertAt=headerIdx+1;
+    while(insertAt<list.length && !list[insertAt].isHeader) insertAt++;
+
+    list.splice(insertAt,0,{txt:'',done:false});
+    saveData(true);
+    renderCalGrid(); renderDayTabsMobile();
+
+    // focus the new empty input
+    setTimeout(()=>{
+        const col=document.getElementById('col-'+day);
+        if(col){
+            const inputs=col.querySelectorAll('.task-inp');
+            // the new task is at position insertAt among all rows; find by matching index
+            for(const inp of inputs){
+                if(inp.value==='') { inp.focus(); break; }
+            }
+        }
+    },50);
 };
 function updateTask(day,row,val){
     const key=getWeekKey();

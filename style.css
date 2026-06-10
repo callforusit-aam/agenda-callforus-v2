@@ -331,6 +331,15 @@ body {
 .co-header:hover .co-del { color: var(--c-text-3); }
 .co-del:hover { color: var(--c-red) !important; }
 
+.co-add-task {
+    background: none; border: none; color: transparent;
+    cursor: pointer; padding: 1px; flex-shrink: 0;
+    transition: color var(--trans);
+    display: flex; align-items: center;
+}
+.co-header:hover .co-add-task { color: var(--c-text-3); }
+.co-add-task:hover { color: var(--c-accent) !important; }
+
 /* task row */
 .task-row {
     display: flex; align-items: flex-start; gap: 7px;
